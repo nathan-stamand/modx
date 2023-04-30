@@ -1,0 +1,41 @@
+FROM php:7.4-apache
+
+ARG UID
+ARG GID
+
+ENV UID=${UID:-1000}
+ENV GID=${GID:-1000}
+
+RUN groupadd --gid ${GID} --system modx
+RUN useradd --gid modx --system --shell /bin/sh --uid ${UID} modx
+ 
+RUN sed -i "s/${APACHE_RUN_USER:=www-data}/${APACHE_RUN_USER:=modx}/g" /etc/apache2/envvars
+RUN sed -i "s/${APACHE_RUN_GROUP:=www-data}/${APACHE_RUN_GROUP:=modx}/g" /etc/apache2/envvars
+
+WORKDIR /var/www/html
+
+RUN apt-get update \
+    && apt-get install -y git vim libpng-dev libzip-dev \
+    && chown -R modx:modx /var/www/html \
+    && chmod -R 777 /var/www/html \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
+    && php -r "if (hash_file('sha384', 'composer-setup.php') === '55ce33d7678c5a611085589f1f3ddf8b3c52d662cd01d4ba75c0ee0459970c2200a51f492d557530c71c15d8dba01eae') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" \
+    && php composer-setup.php \
+    && php -r "unlink('composer-setup.php');" \
+    && mv composer.phar /usr/local/bin/composer
+
+RUN docker-php-ext-install pdo_mysql
+RUN docker-php-ext-install gd
+RUN docker-php-ext-install zip
+
+RUN git clone http://github.com/modxcms/revolution.git -b 3.x . && composer install
+RUN cd /var/www/html/_build \
+    && cp build.config.sample.php build.config.php \
+    && cp build.properties.sample.php build.properties.php \
+    && php transport.core.php
+
+RUN chown -R modx:modx /var/www/html
+RUN chmod -R 777 /var/www/html
+
